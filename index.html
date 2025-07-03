@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Timetable 360 bridge</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2em;
+    }
+    input {
+      margin-bottom: 1em;
+    }
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: 60px repeat(5, 1fr);
+      gap: 1em;
+    }
+    .day-header {
+      text-align: center;
+      font-weight: bold;
+      padding-bottom: 0.5em;
+      min-width: 180px;
+    }
+    .time-labels {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 600px;
+      font-size: 0.8em;
+      padding-right: 0.5em;
+    }
+    .time-label {
+      text-align: right;
+    }
+    .day-column {
+      background: #f0f0f0;
+      border-radius: 5px;
+      position: relative;
+      height: 600px;
+      border: 1px solid #ccc;
+    }
+    .hour-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background-color: #ccc;
+      z-index: 1;
+    }
+
+    .event {
+      position: absolute;
+      left: 2px;
+      right: 2px;
+      padding: 0.3em;
+      background-color: rgba(217, 237, 247, 0.95); /* 95% opacity */
+      border: 1px solid #bce8f1;
+      border-radius: 4px;
+      font-size: 0.75em;
+      line-height: 1.2;
+      box-sizing: border-box;
+      z-index: 2;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .event strong {
+      font-size: 1.20em;
+    }
+
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 20mm 20mm 15mm 10mm; /* top right bottom left */
+      }
+
+      body {
+        margin: 0;
+        font-size: 10pt;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .hour-line {
+        background: none !important;
+        border-top: 1px solid black !important;
+        height: 0 !important;
+        opacity: 1 !important;
+        position: absolute !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 0 !important;
+      }
+
+      .day-column {
+        background-color: #f9f9f9 !important;
+        border: 1px solid #999 !important;
+        position: relative !important;
+      }
+
+      .event {
+        position: absolute !important;
+        z-index: 10 !important;
+      }
+
+      #icsFile {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <input type="file" id="icsFile" accept=".ics" />
+
+  <div class="calendar-grid" id="headerRow"></div>
+  <div class="calendar-grid" id="calendarGrid">
+    <div class="time-labels">
+      <div class="time-label">08:00</div>
+      <div class="time-label">09:00</div>
+      <div class="time-label">10:00</div>
+      <div class="time-label">11:00</div>
+      <div class="time-label">12:00</div>
+      <div class="time-label">13:00</div>
+      <div class="time-label">14:00</div>
+      <div class="time-label">15:00</div>
+      <div class="time-label">16:00</div>
+      <div class="time-label">17:00</div>
+      <div class="time-label">18:00</div>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('icsFile').addEventListener('change', function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const content = e.target.result;
+        const unfolded = unfoldLines(content);
+        const events = parseICS(unfolded);
+        displayEvents(events);
+      };
+      reader.readAsText(file);
+    });
+
+    function unfoldLines(data) {
+      return data.replace(/\r?\n[ \t]/g, '');
+    }
+
+    function parseICS(data) {
+      const events = [];
+      const lines = data.split(/\r?\n/);
+      let event = null;
+
+      lines.forEach(line => {
+        if (line.startsWith('BEGIN:VEVENT')) {
+          event = {};
+          event.attendees = [];
+        } else if (line.startsWith('END:VEVENT')) {
+          events.push(event);
+          event = null;
+        } else if (event) {
+          const [rawKey, value] = line.split(/:(.+)/);
+          if (!rawKey || !value) return;
+
+          const key = rawKey.split(';')[0].trim();
+          const fullKey = rawKey.trim();
+
+          if (key === 'ATTENDEE') {
+            event.attendees.push(fullKey);
+          } else {
+            event[key] = value.trim().replace(/\\,/g, ',');
+          }
+        }
+      });
+
+      return events;
+    }
+
+    function displayEvents(events) {
+      const headerRow = document.getElementById('headerRow');
+      const calendarGrid = document.getElementById('calendarGrid');
+
+      headerRow.innerHTML = '<div></div>';
+      while (calendarGrid.children.length > 1) {
+        calendarGrid.removeChild(calendarGrid.lastChild);
+      }
+
+      if (events.length === 0) {
+        const p = document.createElement('p');
+        p.textContent = 'No events found.';
+        calendarGrid.appendChild(p);
+        return;
+      }
+
+      const grouped = {};
+      events.forEach(evt => {
+        const dateKey = (evt['DTSTART'] || '').slice(0, 8);
+        if (!grouped[dateKey]) grouped[dateKey] = [];
+        grouped[dateKey].push(evt);
+      });
+
+      const sortedDates = Object.keys(grouped).sort();
+
+      sortedDates.slice(0, 5).forEach(dateKey => {
+        const date = new Date(
+          dateKey.slice(0, 4),
+          parseInt(dateKey.slice(4, 6)) - 1,
+          dateKey.slice(6, 8)
+        );
+        const dayName = new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(date);
+        const dateLabel = `${dayName} ${date.getDate().toString().padStart(2, '0')}-${(date.getMonth()+1).toString().padStart(2, '0')}`;
+
+        const header = document.createElement('div');
+        header.className = 'day-header';
+        header.textContent = dateLabel;
+        headerRow.appendChild(header);
+
+        const column = document.createElement('div');
+        column.className = 'day-column';
+
+        for (let h = 0; h <= 10; h++) {
+          const line = document.createElement('div');
+          line.className = 'hour-line';
+          line.style.top = `${h * (600 / 10)}px`;
+          column.appendChild(line);
+        }
+
+        // Prepare events for this day with positioning info
+        const dayEvents = grouped[dateKey].map(evt => {
+          const start = evt['DTSTART'] || '';
+          const end = evt['DTEND'] || '';
+          const startHour = parseInt(start.slice(9, 11));
+          const startMin = parseInt(start.slice(11, 13));
+          const endHour = parseInt(end.slice(9, 11));
+          const endMin = parseInt(end.slice(11, 13));
+
+          const top = ((startHour - 8) * 60 + startMin);
+          const height = ((endHour - startHour) * 60 + (endMin - startMin));
+
+          return {
+            ...evt,
+            top,
+            height,
+            SUMMARY: evt['SUMMARY'] || 'No Title',
+            attendees: evt.attendees || []
+          };
+        });
+
+        // Merge events only if they start at the exact same time
+        const mergedEvents = [];
+        dayEvents.forEach(evt => {
+          if (mergedEvents.length === 0) {
+            mergedEvents.push({
+              ...evt,
+              titles: [evt.SUMMARY]
+            });
+          } else {
+            const last = mergedEvents[mergedEvents.length - 1];
+            if (evt.top === last.top) {
+              last.titles.push(evt.SUMMARY);
+              last.attendees = [...new Set([...last.attendees, ...evt.attendees])];
+            } else {
+              mergedEvents.push({
+                ...evt,
+                titles: [evt.SUMMARY]
+              });
+            }
+          }
+        });
+
+        mergedEvents.forEach(evt => {
+          const attendees = evt.attendees.map(line => {
+            const cnMatch = line.match(/CN="?([^";]+)"?/);
+            return cnMatch ? cnMatch[1].trim() : null;
+          }).filter(Boolean);
+
+          const groups = attendees
+            .filter(a => a.startsWith('WB-MSTC-'))
+            .map(g => g.replace('WB-MSTC-', ''));
+
+          const teachers = attendees.filter(a => !a.startsWith('WB-MSTC-'))
+            .map(t => t.replace(/ \(TD\)/g, '').replace(/\?/g, 'ë'));
+
+          // Titles on the same line separated by commas
+          const cleanedTitles = evt.titles.map(title => title.replace(/\?/g, 'ë').split(',')[0].trim());
+          const titleText = cleanedTitles.join(', ');
+
+          const div = document.createElement('div');
+          div.className = 'event';
+          div.style.top = `${evt.top}px`;
+          div.style.height = `${evt.height}px`;
+          div.innerHTML = `
+            <strong>${titleText}</strong><br>
+            <em>${[...new Set(teachers)].join(', ') || 'Unknown'}</em><br>
+            <span>${[...new Set(groups)].join(', ') || 'Unknown'}</span>
+          `;
+          column.appendChild(div);
+        });
+
+        calendarGrid.appendChild(column);
+      });
+    }
+  </script>
+
+</body>
+</html>
