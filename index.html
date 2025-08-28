@@ -299,10 +299,10 @@
           }).filter(Boolean);
 
           const groups = attendees
-            .filter(a => a.startsWith('WB-MSTC-'))
-            .map(g => g.replace('WB-MSTC-', ''));
+            .filter(a => a.startsWith('TD-MSTC-'))
+            .map(g => g.replace('TD-MSTC-', ''));
 
-          const teachers = attendees.filter(a => !a.startsWith('WB-MSTC-'))
+          const teachers = attendees.filter(a => !a.startsWith('TD-MSTC-'))
             .map(t => t.replace(/ \(TD\)/g, '').replace(/\?/g, 'ë'));
 
           const cleanedTitles = evt.titles.map(title => title.replace(/\?/g, 'ë').split(',')[0].trim());
